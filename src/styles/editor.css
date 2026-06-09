@@ -1,0 +1,33 @@
+/* CodeMirror overrides for FocusMark */
+.cm-editor {
+  height: 100%;
+}
+
+.cm-editor .cm-scroller {
+  font-family: var(--editor-font-family, monospace) !important;
+  font-size: var(--editor-font-size, 16px);
+}
+
+.cm-editor .cm-content {
+  font-family: var(--editor-font-family, monospace) !important;
+}
+
+.cm-editor .cm-cursor {
+  border-left-color: var(--text-primary) !important;
+}
+
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground {
+  background-color: var(--accent-bg) !important;
+  opacity: 0.3;
+}
+
+.cm-editor .cm-activeLine {
+  background-color: var(--block-editor-bg);
+}
+
+/* Source mode specific */
+#editor-container .cm-editor {
+  max-width: var(--doc-max-width, 780px);
+  margin: 0 auto;
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+target/
+*.log
+.DS_Store
+Thumbs.db
+
+# Compiled TypeScript output
+src/**/*.js
+src/**/*.js.map
