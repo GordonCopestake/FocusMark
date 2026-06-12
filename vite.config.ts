@@ -8,6 +8,7 @@ export default defineConfig(async () => ({
   plugins: [
     legacy({
       targets: ["defaults", "not IE 11"],
+      modernPolyfills: true,
     }),
   ],
   server: {

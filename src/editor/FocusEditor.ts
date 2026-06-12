@@ -63,6 +63,10 @@ export class SourceEditor implements EditorController {
     });
 
     this.view.focus();
+    // Second focus after DOM paint so single-click activation shows cursor
+    requestAnimationFrame(() => {
+      this.view?.focus();
+    });
   }
 
   unmount(): void {
@@ -238,6 +242,10 @@ export class BlockEditor implements EditorController {
     });
 
     this.view.focus();
+    // Second focus after DOM paint so single-click activation shows cursor
+    requestAnimationFrame(() => {
+      this.view?.focus();
+    });
   }
 
   unmount(): void {
