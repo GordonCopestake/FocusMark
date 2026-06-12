@@ -1,0 +1,1737 @@
+# Build Specification: Minimal Cross-Platform Markdown Block Editor
+
+## 1. Project Name
+
+Working name: **FocusMark**
+
+The name is provisional. Keep the app name in configuration constants so it can be changed later without a large refactor.
+
+## 2. Product Objective
+
+Build a small, fast, minimal Markdown editor for Windows, macOS and Linux.
+
+The core experience:
+
+> The document normally appears as rendered Markdown. When the user edits a section, only the current Markdown block becomes raw editable Markdown. The rest of the document remains rendered.
+
+The app should feel closer to **Notepad for Markdown** than to Obsidian, VS Code, Typora, Zettlr or a knowledge-base system.
+
+Primary goals:
+
+1. Fast launch.
+2. Fast typing.
+3. Minimal UI.
+4. Small binary/install size.
+5. Native file open/save behaviour.
+6. Cross-platform support.
+7. Open-source-friendly architecture.
+8. Keyboard-first operation.
+9. Configurable keyboard shortcuts.
+10. Reliable fallback to full raw Markdown source mode.
+
+Non-negotiable principles:
+
+* Source Markdown is the single source of truth.
+* Never silently reformat the user’s Markdown.
+* Never corrupt files.
+* Keep the app simple.
+* Prefer predictable behaviour over clever behaviour.
+* No telemetry.
+* No account.
+* No cloud sync.
+* No database.
+* No plugin marketplace in v1.
+
+## 3. Target Platforms
+
+Support:
+
+* Windows 10/11 x64.
+* macOS, Apple Silicon and Intel where practical.
+* Mainstream Linux desktop distributions.
+
+Package targets:
+
+* Windows installer.
+* macOS app bundle and/or DMG.
+* Linux AppImage.
+* Optional Linux deb/rpm later.
+
+The app must be able to register itself as the default editor for:
+
+* `.md`
+* `.markdown`
+* `.mdown`
+* `.mkd`
+
+When a user double-clicks a Markdown file, the app should open that file.
+
+## 4. Technology Stack
+
+Use:
+
+* Tauri v2.
+* TypeScript.
+* Vite.
+* Plain TypeScript or Svelte.
+* CodeMirror 6.
+* Rust only where required for Tauri backend/native integration.
+
+Preferred frontend choice:
+
+* Use **plain TypeScript** unless UI complexity justifies Svelte.
+* Avoid React unless absolutely necessary.
+* Avoid large UI frameworks.
+* Avoid heavy component libraries.
+* Avoid Monaco.
+* Avoid Electron.
+* Avoid server processes.
+
+Markdown parsing/rendering:
+
+* Use a CommonMark-compatible parser with GFM-style extensions.
+* **Important Parse-Mapping Requirement:** Because the rendered block-editing model relies on matching exact character offsets, standard HTML-only parsers like `markdown-it` (which only output line ranges) are highly error-prone. The implementation must use a parser that constructs an Abstract Syntax Tree (AST) with precise character/byte offsets, such as **`remark`** (via `remark-parse` and the `mdast` node positions).
+* Use **`DOMPurify`** as a lightweight sanitisation layer for rendered HTML to prevent XSS.
+
+Tauri backend responsibilities:
+
+* Native file open.
+* Native file save.
+* Native save-as.
+* Native menus.
+* File association handling.
+* Open-with handling.
+* Single-instance handling.
+* Recent file persistence.
+* Unsaved-change protection.
+* Window title updates.
+* Platform packaging.
+
+Frontend responsibilities:
+
+* Markdown rendering.
+* Block mapping.
+* Active block editing.
+* Source mode editing.
+* Keyboard shortcuts.
+* Command registry.
+* Formatting commands.
+* Settings UI.
+* Dirty state.
+* Find.
+* Status bar.
+* Toolbar.
+* Preferences.
+
+## 5. Markdown Dialect
+
+Default dialect:
+
+* CommonMark-compatible Markdown core.
+* Enable GitHub Flavored Markdown-style extensions:
+
+  * Tables.
+  * Task lists.
+  * Strikethrough.
+  * Fenced code blocks.
+  * Autolinks.
+
+Do not implement in v1:
+
+* Mermaid diagrams.
+* Math rendering.
+* Footnotes unless the chosen parser supports them cheaply and safely.
+* Wiki links.
+* Backlinks.
+* Tags database.
+* Graph view.
+* Embedded live web content.
+* Plugin system.
+
+The app must preserve the user’s source Markdown exactly except where the user edits it.
+
+Do not auto-format.
+
+Do not auto-renumber ordered lists except where explicitly required by direct user editing.
+
+Do not normalise line endings for existing files. Preserve detected line endings.
+
+## 6. Core UX Model
+
+### 6.1 Default Mode: Rendered Block Editing
+
+The default mode is **Rendered Editing Mode**.
+
+In this mode:
+
+* The document appears as rendered Markdown.
+* Clicking or navigating to a rendered element activates the containing Markdown source block.
+* Only that active block becomes raw editable Markdown.
+* All other blocks remain rendered.
+* The active block appears in-place.
+* The active block uses a monospace font.
+* The active block has subtle visual highlighting.
+* Changes are written to the source document model.
+* When the block loses focus, it returns to rendered view.
+
+The app should feel like:
+
+> A Markdown viewer where the current block instantly becomes Notepad.
+
+### 6.2 Raw Source Mode
+
+The app must also have **Raw Source Mode**.
+
+In Raw Source Mode:
+
+* The whole document is shown as raw Markdown.
+* Editing is plain text editing.
+* Use CodeMirror 6.
+* It must be fast, reliable and boring.
+* This mode is the fallback for unusual Markdown edge cases.
+
+Switching between Rendered Editing Mode and Raw Source Mode must not alter the document.
+
+### 6.3 Mode Toggle
+
+The app must include a visible source toggle.
+
+Available from:
+
+* Minimal toolbar button.
+* View menu.
+* Configurable keyboard shortcut.
+
+Default shortcut:
+
+```text
+Ctrl+E / Cmd+E
+```
+
+Toolbar label may be:
+
+```text
+Source
+```
+
+or an icon with accessible text.
+
+When Source Mode is active, the toolbar button must show an active state.
+
+## 7. Block Editing Behaviour
+
+Markdown is block-structured, not purely line-structured. Therefore the editor should activate whole Markdown blocks rather than individual physical source lines.
+
+### 7.1 General Block Rules
+
+When a block is active:
+
+* Replace the rendered block with a raw Markdown editor for that block.
+* Use CodeMirror 6 or a lightweight editable text area for the active block.
+* Prefer CodeMirror 6 for consistent editing, shortcuts and selection behaviour.
+* Keep the editor visually in-place.
+* Use monospace font.
+* Preserve approximate vertical spacing to avoid excessive layout jumps.
+* Commit changes live to `DocumentState.currentText`.
+* **Typing Latency Optimization:** To prevent input lag and layout stuttering, the application must **not** perform a full AST re-parse or full document re-render on every single keystroke. Instead, update the active block's text locally, apply a running delta offset to any subsequent block position caches, and only trigger a full document AST parsing and rendering pass when the active block loses focus (`blur`) or after a generous debounce delay (e.g., 500ms to 1000ms of typing inactivity).
+* Preserve cursor position as far as practical during re-rendering.
+* Never alter unrelated blocks.
+
+### 7.2 Headings
+
+Inactive rendered heading:
+
+```text
+Project Notes
+```
+
+Active raw block:
+
+```markdown
+# Project Notes
+```
+
+A heading is edited as a single raw Markdown block.
+
+### 7.3 Paragraphs
+
+A paragraph is edited as the full raw paragraph block.
+
+If the source paragraph spans multiple physical lines, all those lines become editable together.
+
+Do not collapse, unwrap or rewrap paragraph lines automatically.
+
+### 7.4 Lists
+
+Lists should be edited as a block.
+
+For v1, prefer activating the containing list block rather than individual list items.
+
+Requirements:
+
+* Preserve nested indentation.
+* Preserve marker style.
+* Pressing Enter at the end of a list item should create a new list item where practical.
+* Pressing Enter on an empty list item should terminate the list where practical.
+* Ordered lists should not be aggressively renumbered.
+* User source formatting should be preserved.
+
+### 7.5 Blockquotes
+
+A blockquote should be edited as the whole quote block.
+
+Example active block:
+
+```markdown
+> This is a quoted paragraph.
+> It can span multiple source lines.
+```
+
+### 7.6 Fenced Code Blocks
+
+A fenced code block should be edited as the whole fenced block.
+
+Example active block:
+
+````markdown
+```powershell
+Get-Process
+```
+````
+
+Do not attempt per-line editing inside fenced code blocks in v1.
+
+Syntax highlighting inside inactive rendered code blocks is optional and should be off by default for performance.
+
+### 7.7 Tables
+
+A Markdown table should be edited as the whole raw table block.
+
+Example active block:
+
+```markdown
+| Name | Value |
+|---|---:|
+| A | 10 |
+| B | 20 |
+```
+
+Do not implement spreadsheet-style cell editing in v1.
+
+### 7.8 Horizontal Rules
+
+A horizontal rule is edited as its raw source block:
+
+```markdown
+---
+```
+
+### 7.9 Images and Links
+
+Images and links should render normally when inactive.
+
+When the containing block is active, the user edits the raw Markdown source.
+
+Do not implement modal link/image editors in v1.
+
+### 7.10 HTML Blocks
+
+Default v1 behaviour:
+
+* Raw HTML should either be strictly sanitised or escaped.
+* Do not execute scripts.
+* Do not allow inline event handlers.
+* Do not allow `javascript:` URLs.
+
+If HTML block mapping is uncertain, activate the full HTML block as raw source.
+
+## 8. Rendering Architecture
+
+The source Markdown string is canonical.
+
+Use this document state shape:
+
+```ts
+type DocumentState = {
+  filePath: string | null;
+  fileName: string;
+  originalText: string;
+  currentText: string;
+  lineEnding: "\n" | "\r\n";
+  hadBom: boolean;
+  dirty: boolean;
+  activeBlockId: string | null;
+  selection: SourceSelection | null;
+  lastSavedAt: number | null;
+  fileModifiedAt: number | null;
+  mode: "rendered" | "source";
+};
+```
+
+Selection type:
+
+```ts
+type SourceSelection = {
+  startOffset: number;
+  endOffset: number;
+};
+```
+
+Represent rendered Markdown as block models:
+
+```ts
+type MarkdownBlockType =
+  | "heading"
+  | "paragraph"
+  | "list"
+  | "blockquote"
+  | "code_fence"
+  | "table"
+  | "thematic_break"
+  | "html"
+  | "image"
+  | "unknown";
+
+type RenderBlock = {
+  id: string;
+  type: MarkdownBlockType;
+  startOffset: number;
+  endOffset: number;
+  startLine: number;
+  endLine: number;
+  source: string;
+  html: string;
+};
+```
+
+Rendering pipeline:
+
+1. Parse Markdown source utilizing an AST parser (e.g. `remark-parse`) to capture accurate character offsets.
+2. Produce block model with precise source ranges (`startOffset` and `endOffset`).
+3. Render inactive blocks as DOM elements using sanitised HTML.
+4. Render the active block as a raw CodeMirror 6 editor instance positioned in-place.
+5. Keep a mapping from DOM elements to block IDs.
+6. On click or keyboard navigation, set `activeBlockId`.
+7. On edit, replace the source range for that block in `currentText`. During typing, offset calculations for subsequent blocks must be updated using a delta-tracker rather than triggering full document AST recalculations.
+8. Recalculate block mapping after edits on block exit (`blur`) or upon a debounced delay.
+
+For small documents, full re-render is acceptable.
+
+For larger documents, optimise later with block-level rendering.
+
+Performance thresholds:
+
+* Under 100 KB: full re-render acceptable.
+* 100 KB to 1 MB: prefer block-level re-rendering.
+* Over 1 MB: Source Mode may be recommended if rendered editing becomes slow.
+
+## 9. Editing Engine
+
+Use CodeMirror 6 for:
+
+* Raw Source Mode.
+* Active block editor.
+
+Active block editor requirements:
+
+* No gutter.
+* No minimap.
+* No autocomplete.
+* No heavy linting.
+* No AI.
+* No complex IDE features.
+* Markdown syntax highlighting optional.
+* Must support normal text editing.
+* Must integrate with the central command registry.
+* Must support formatting commands.
+
+Undo/redo:
+
+* **Unified State History:** Creating and destroying CodeMirror instances on each active block switch will clear local undo stacks. To maintain global undo/redo behavior, the application must orchestrate dynamic block edits through a single continuous background document model or persist individual block undo histories across editor transitions.
+* Switching modes must not destroy the document state or its command history.
+
+## 10. Formatting Commands
+
+Formatting commands must work in both Rendered Editing Mode and Raw Source Mode.
+
+They should operate on:
+
+1. Current selection, if text is selected.
+2. Current word, if no text is selected and the command makes sense.
+3. Current block, for block-level commands.
+
+*Formatting Context Note:* In Rendered Editing Mode, formatting commands function inside the active block's editor. If no block is currently active (focused), triggering a formatting command should automatically activate editing on the block containing the cursor focus point, or otherwise do nothing.
+
+### 10.1 Bold
+
+Default shortcut:
+
+```text
+Ctrl+B / Cmd+B
+```
+
+If text is selected:
+
+```markdown
+selected text
+```
+
+becomes:
+
+```markdown
+**selected text**
+```
+
+If the selected text is already wrapped in `**`, remove the wrapping.
+
+### 10.2 Italic
+
+Default shortcut:
+
+```text
+Ctrl+I / Cmd+I
+```
+
+Wrap or unwrap selection/current word with:
+
+```markdown
+*
+```
+
+### 10.3 Inline Code
+
+Default shortcut:
+
+```text
+Ctrl+` / Cmd+`
+```
+
+Wrap or unwrap selection/current word with backticks.
+
+### 10.4 Strikethrough
+
+Default shortcut:
+
+```text
+Ctrl+Shift+X / Cmd+Shift+X
+```
+
+Wrap or unwrap selection/current word with:
+
+```markdown
+~~
+```
+
+### 10.5 Link
+
+Default shortcut:
+
+```text
+Ctrl+K / Cmd+K
+```
+
+If text is selected, convert to:
+
+```markdown
+[selected text](url)
+```
+
+Select the `url` placeholder so the user can type immediately.
+
+If no text is selected, insert:
+
+```markdown
+[text](url)
+```
+
+Select `text`.
+
+### 10.6 Headings
+
+Heading shortcuts apply to the current block.
+
+Defaults:
+
+```text
+Heading 1    Ctrl+Alt+1 / Cmd+Alt+1
+Heading 2    Ctrl+Alt+2 / Cmd+Alt+2
+Heading 3    Ctrl+Alt+3 / Cmd+Alt+3
+```
+
+If the block already has a heading marker, replace it with the requested heading level.
+
+### 10.7 Lists
+
+Bullet list command toggles `- ` at the start of selected lines or current block.
+
+Numbered list command toggles ordered list markers.
+
+Task list command toggles:
+
+```markdown
+- [ ]
+```
+
+on selected lines or current block.
+
+Default shortcuts:
+
+```text
+Bullet List      Ctrl+Shift+8 / Cmd+Shift+8
+Numbered List    Ctrl+Shift+7 / Cmd+Shift+7
+Task List        Ctrl+Shift+9 / Cmd+Shift+9
+```
+
+### 10.8 Quote
+
+Default shortcut:
+
+```text
+Ctrl+Shift+. / Cmd+Shift+.
+```
+
+Toggle `> ` at the start of selected lines or current block.
+
+### 10.9 Code Block
+
+Default shortcut:
+
+```text
+Ctrl+Alt+C / Cmd+Alt+C
+```
+
+Wrap selected lines/current block in fenced code markers:
+
+````markdown
+```
+selected text
+```
+````
+
+If the selected block is already fenced, remove the fence.
+
+## 11. Keyboard-First Operation
+
+The app must be usable primarily from the keyboard.
+
+The following must be possible without using the mouse:
+
+1. Open a file.
+2. Save a file.
+3. Save as.
+4. Create new file.
+5. Toggle raw source mode.
+6. Move to next block.
+7. Move to previous block.
+8. Edit current block.
+9. Exit current block.
+10. Bold selected text.
+11. Italicise selected text.
+12. Insert inline code.
+13. Create a link.
+14. Create headings.
+15. Create lists.
+16. Open settings.
+17. Change a shortcut.
+18. Restore default shortcuts.
+19. Find text.
+20. Close the file/app with unsaved-change protection.
+
+## 12. Command Registry
+
+Create a central command registry.
+
+Do not scatter shortcut handling throughout components.
+
+All menu items, toolbar buttons and keyboard shortcuts must call the same command registry.
+
+Suggested command structure:
+
+```ts
+type CommandCategory =
+  | "File"
+  | "Edit"
+  | "View"
+  | "Format"
+  | "Navigate"
+  | "Settings"
+  | "Help";
+
+type CommandId =
+  | "file.new"
+  | "file.open"
+  | "file.save"
+  | "file.saveAs"
+  | "file.close"
+  | "app.quit"
+  | "edit.undo"
+  | "edit.redo"
+  | "edit.cut"
+  | "edit.copy"
+  | "edit.paste"
+  | "edit.selectAll"
+  | "edit.find"
+  | "view.toggleSourceMode"
+  | "view.increaseFontSize"
+  | "view.decreaseFontSize"
+  | "view.resetFontSize"
+  | "view.toggleToolbar"
+  | "view.toggleStatusBar"
+  | "format.bold"
+  | "format.italic"
+  | "format.inlineCode"
+  | "format.strikethrough"
+  | "format.link"
+  | "format.heading1"
+  | "format.heading2"
+  | "format.heading3"
+  | "format.bulletList"
+  | "format.numberedList"
+  | "format.taskList"
+  | "format.quote"
+  | "format.codeBlock"
+  | "navigate.nextBlock"
+  | "navigate.previousBlock"
+  | "navigate.editCurrentBlock"
+  | "navigate.exitBlock"
+  | "settings.open"
+  | "help.about";
+
+type Command = {
+  id: CommandId;
+  label: string;
+  category: CommandCategory;
+  defaultShortcuts: ShortcutBinding[];
+  run: (context: CommandContext) => Promise<void> | void;
+  enabled?: (context: CommandContext) => boolean;
+};
+```
+
+Command context:
+
+```ts
+type CommandContext = {
+  document: DocumentState;
+  preferences: Preferences;
+  editor: EditorController;
+  file: FileController;
+  ui: UiController;
+};
+```
+
+This architecture ensures:
+
+* Toolbar and keyboard remain consistent.
+* Menu labels can show the user’s current shortcuts.
+* Shortcuts can be changed without changing command implementations.
+* Future commands can be added cleanly.
+
+## 13. Configurable Keyboard Shortcuts
+
+The app must provide configurable keyboard shortcuts for as many commands as practical.
+
+Shortcut data model:
+
+```ts
+type ShortcutMap = Record<CommandId, ShortcutBinding[]>;
+
+type ShortcutBinding = {
+  key: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  meta?: boolean;
+};
+```
+
+Requirements:
+
+* Users can view all configurable actions.
+* Users can search/filter actions.
+* Users can assign a new shortcut.
+* Users can clear a shortcut.
+* Users can reset one shortcut to default.
+* Users can reset all shortcuts to defaults.
+* Detect conflicts.
+* Warn before replacing an existing shortcut.
+* Support platform-aware defaults:
+
+  * Ctrl on Windows/Linux.
+  * Cmd on macOS.
+* Do not rely on shortcuts that the OS prevents the app from intercepting.
+* Do not allow invalid shortcut combinations.
+* Store shortcuts in preferences.
+* Menu items should display the currently assigned shortcut.
+
+Conflict example:
+
+```text
+Ctrl+B is already assigned to Bold.
+Replace it?
+
+[Replace] [Cancel]
+```
+
+If the user chooses Replace:
+
+* Remove `Ctrl+B` from Bold.
+* Assign `Ctrl+B` to the new command.
+
+## 14. Default Keyboard Shortcuts
+
+Use these defaults unless there is a platform conflict.
+
+### File
+
+```text
+New                         Ctrl+N / Cmd+N
+Open                        Ctrl+O / Cmd+O
+Save                        Ctrl+S / Cmd+S
+Save As                     Ctrl+Shift+S / Cmd+Shift+S
+Close                       Ctrl+W / Cmd+W
+Quit                        Ctrl+Q / Cmd+Q
+```
+
+### Edit
+
+```text
+Undo                        Ctrl+Z / Cmd+Z
+Redo                        Ctrl+Y / Cmd+Shift+Z
+Cut                         Ctrl+X / Cmd+X
+Copy                        Ctrl+C / Cmd+C
+Paste                       Ctrl+V / Cmd+V
+Select All                  Ctrl+A / Cmd+A
+Find                        Ctrl+F / Cmd+F
+```
+
+### View
+
+```text
+Toggle Source Mode          Ctrl+E / Cmd+E
+Increase Font Size          Ctrl+= / Cmd+=
+Decrease Font Size          Ctrl+- / Cmd+-
+Reset Font Size             Ctrl+0 / Cmd+0
+Toggle Toolbar              Ctrl+Shift+T / Cmd+Shift+T
+Toggle Status Bar           Ctrl+Shift+B / Cmd+Shift+B
+```
+
+### Format
+
+```text
+Bold                        Ctrl+B / Cmd+B
+Italic                      Ctrl+I / Cmd+I
+Inline Code                 Ctrl+` / Cmd+`
+Strikethrough               Ctrl+Shift+X / Cmd+Shift+X
+Link                        Ctrl+K / Cmd+K
+Heading 1                   Ctrl+Alt+1 / Cmd+Alt+1
+Heading 2                   Ctrl+Alt+2 / Cmd+Alt+2
+Heading 3                   Ctrl+Alt+3 / Cmd+Alt+3
+Bullet List                 Ctrl+Shift+8 / Cmd+Shift+8
+Numbered List               Ctrl+Shift+7 / Cmd+Shift+7
+Task List                   Ctrl+Shift+9 / Cmd+Shift+9
+Quote                       Ctrl+Shift+. / Cmd+Shift+.
+Code Block                  Ctrl+Alt+C / Cmd+Alt+C
+```
+
+### Navigation
+
+```text
+Next Block                  Alt+Down
+Previous Block              Alt+Up
+Edit Current Block          Enter
+Exit Current Block          Escape
+Open Settings               Ctrl+, / Cmd+,
+```
+
+## 15. Settings Section
+
+The app must include a settings section.
+
+Settings should be:
+
+* Local.
+* Simple.
+* Fast.
+* Stored on the user’s machine.
+* Editable without an account.
+* Not synced in v1.
+
+Settings must be accessible from:
+
+* App/File menu.
+* Toolbar Settings button.
+* Configurable keyboard shortcut.
+
+Default shortcut:
+
+```text
+Ctrl+, / Cmd+,
+```
+
+Preferences type:
+
+```ts
+type Preferences = {
+  theme: "system" | "light" | "dark";
+  fontSize: number;
+  editorFontFamily: string;
+  readerFontFamily: string;
+  lineWidth: "narrow" | "normal" | "wide";
+  showStatusBar: boolean;
+  showToolbar: boolean;
+  defaultMode: "rendered" | "source";
+  shortcuts: ShortcutMap;
+};
+```
+
+Default preferences:
+
+```ts
+const defaultPreferences: Preferences = {
+  theme: "system",
+  fontSize: 16,
+  editorFontFamily:
+    "ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace",
+  readerFontFamily:
+    "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+  lineWidth: "normal",
+  showStatusBar: true,
+  showToolbar: true,
+  defaultMode: "rendered",
+  shortcuts: defaultShortcutMap,
+};
+```
+
+### 15.1 Settings UI
+
+The settings UI should contain these sections:
+
+1. Appearance.
+2. Editor.
+3. Keyboard Shortcuts.
+4. Advanced.
+
+### 15.2 Appearance Settings
+
+Fields:
+
+* Theme: System / Light / Dark.
+* Reader font family.
+* Editor font family.
+* Font size.
+* Line width: Narrow / Normal / Wide.
+* Show toolbar.
+* Show status bar.
+
+### 15.3 Editor Settings
+
+Fields:
+
+* Default mode: Rendered / Source.
+* Enable GFM extensions.
+* Remote images enabled: default false.
+* Raw HTML handling:
+
+  * Escape raw HTML.
+  * Sanitise raw HTML (via DOMPurify).
+  * Allow unsafe raw HTML is not available in v1.
+
+### 15.4 Keyboard Shortcut Settings
+
+Shortcut settings UI columns:
+
+```text
+Action | Current Shortcut | Category | Reset
+```
+
+Features:
+
+* Search/filter commands.
+* Group by category.
+* Assign shortcut by pressing key combination.
+* Conflict detection.
+* Clear shortcut.
+* Reset individual shortcut.
+* Reset all shortcuts.
+
+## 16. File Operations
+
+### 16.1 New File
+
+When creating a new file:
+
+* Start with empty document.
+* `filePath = null`.
+* `dirty = false`.
+* Default line ending:
+
+  * Windows: CRLF.
+  * macOS/Linux: LF.
+* Window title:
+
+```text
+Untitled - FocusMark
+```
+
+### 16.2 Open File
+
+Requirements:
+
+* Use native file open dialog.
+* Filter Markdown files:
+
+  * `.md`
+  * `.markdown`
+  * `.mdown`
+  * `.mkd`
+  * all files fallback.
+* Load as UTF-8.
+* Detect UTF-8 BOM.
+* Preserve BOM if present.
+* Detect line endings.
+* Preserve original line endings.
+* Set window title to filename.
+* Add path to recent files.
+* If current document is dirty, prompt:
+
+  * Save.
+  * Discard.
+  * Cancel.
+
+### 16.3 Save
+
+Requirements:
+
+* If `filePath` exists, write to same path.
+* Preserve line endings.
+* Preserve BOM if originally present.
+* Set `dirty = false`.
+* Update `originalText`.
+* Update `fileModifiedAt`.
+* Update window title.
+
+### 16.4 Save As
+
+Requirements:
+
+* Use native save dialog.
+* Default extension: `.md`.
+* Remember selected path.
+* Save file.
+* Update window title.
+* Add path to recent files.
+
+### 16.5 External File Changes
+
+Simple v1 behaviour:
+
+* If opened file changes on disk while document is dirty:
+
+  * Warn before saving.
+* If opened file changes on disk while document is not dirty:
+
+  * Offer to reload.
+
+Do not implement complex merge behaviour in v1.
+
+## 17. Tauri Backend Commands
+
+Implement Rust commands exposed to frontend.
+
+*Note:* These backend commands are utilized (rather than standard `tauri-plugin-fs`) specifically to facilitate robust custom UTF-8 character encoding, line ending identification (CRLF vs. LF), BOM preservation, and lock safety.
+
+```rust
+open_file_dialog() -> Result<Option<OpenedFile>, String>
+open_file_by_path(path: String) -> Result<OpenedFile, String>
+save_file(path: String, contents: String, options: SaveOptions) -> Result<SavedFile, String>
+save_file_dialog(default_name: Option<String>) -> Result<Option<String>, String>
+get_launch_file_args() -> Result<Vec<String>, String>
+show_in_folder(path: String) -> Result<(), String>
+load_preferences() -> Result<PreferencesFile, String>
+save_preferences(preferences: PreferencesFile) -> Result<(), String>
+```
+
+TypeScript types:
+
+```ts
+type OpenedFile = {
+  path: string;
+  name: string;
+  contents: string;
+  detectedLineEnding: "\n" | "\r\n";
+  hadBom: boolean;
+  modifiedAt: number | null;
+};
+
+type SaveOptions = {
+  lineEnding: "\n" | "\r\n";
+  preserveBom: boolean;
+};
+
+type SavedFile = {
+  path: string;
+  modifiedAt: number | null;
+};
+
+type PreferencesFile = {
+  version: number;
+  preferences: Preferences;
+};
+```
+
+## 18. File Association and Open-With Behaviour
+
+The app must declare file associations in Tauri bundle configuration for:
+
+* `.md`
+* `.markdown`
+* `.mdown`
+* `.mkd`
+
+Description:
+
+```text
+Markdown Document
+```
+
+MIME/content types where applicable:
+
+```text
+text/markdown
+text/x-markdown
+text/plain fallback only where necessary
+```
+
+When a Markdown file is opened from the OS:
+
+* The app opens.
+* The file path is passed to the app.
+* The document loads automatically.
+
+Single-instance behavior:
+* Single-instance behavior must be enforced using the official `tauri-plugin-single-instance`.
+* On Windows and Linux, the Rust backend must capture arguments from secondary launches via this plugin and emit an event containing the file path payload to the running frontend.
+* On macOS, the backend must hook into native macOS URL/file-open notification hooks (e.g. `tauri::AppHandle` integration or event loop hooks) to capture "Open With" triggers while the app is active and forward the file path to the frontend.
+* If the existing window is empty and clean, reuse it.
+* If the existing window has a dirty document, prompt before replacing the current document.
+
+Preferred v1:
+
+* One document per window.
+* Multiple windows allowed if practical.
+* No tab bar in v1.
+
+## 19. Unsaved Changes
+
+When closing, quitting, opening another file, or creating a new file while dirty, prompt:
+
+```text
+Save changes to [filename]?
+
+[Save] [Discard] [Cancel]
+```
+
+Behaviour:
+
+* Save: save, then continue.
+* Discard: continue without saving.
+* Cancel: abort the action.
+
+Must apply to:
+
+* New file.
+* Open file.
+* Close window.
+* Quit app.
+* File launched from OS while current window has dirty changes.
+
+## 20. Menus
+
+Use native menu structure.
+
+### File
+
+* New
+* Open...
+* Open Recent
+* Save
+* Save As...
+* Close
+* Quit
+
+### Edit
+
+* Undo
+* Redo
+* Cut
+* Copy
+* Paste
+* Select All
+* Find
+
+### View
+
+* Toggle Source Mode
+* Increase Text Size
+* Decrease Text Size
+* Reset Text Size
+* Toggle Toolbar
+* Toggle Status Bar
+* Toggle Dark Mode
+
+### Format
+
+* Bold
+* Italic
+* Inline Code
+* Strikethrough
+* Link
+* Heading 1
+* Heading 2
+* Heading 3
+* Bullet List
+* Numbered List
+* Task List
+* Quote
+* Code Block
+
+### Settings
+
+* Settings...
+
+### Help
+
+* About FocusMark
+
+Menu labels must display the user’s current shortcut where possible.
+
+## 21. Minimal Toolbar
+
+Add a small optional toolbar.
+
+Default toolbar items:
+
+* New.
+* Open.
+* Save.
+* Bold.
+* Italic.
+* Link.
+* Source toggle.
+* Settings.
+
+Toolbar rules:
+
+* Must be hideable.
+* Must not become a ribbon.
+* Must not dominate the UI.
+* Must not be required for normal use.
+* Commands must call the central command registry.
+* Formatting buttons are acceptable only if they remain minimal.
+
+## 22. Status Bar
+
+Add a small optional status bar.
+
+Show:
+
+* Dirty indicator.
+* File encoding: UTF-8.
+* Line ending: LF or CRLF.
+* Current line/block.
+* Word count.
+
+Status bar must be hideable.
+
+## 23. Find
+
+Implement simple in-document find.
+
+Requirements:
+
+* Ctrl+F / Cmd+F opens find box.
+* Search raw Markdown source, not rendered text.
+* Highlight current match.
+* Enter moves to next match.
+* Shift+Enter moves to previous match.
+* Escape closes find box.
+* If a match is selected, activate the block containing that match.
+
+Do not implement replace in v1.
+
+## 24. Styling
+
+Design target:
+
+* Calm.
+* Minimal.
+* Native-feeling.
+* Fast.
+* No flashy gradients.
+* No animation except subtle focus transitions.
+* No large icon set.
+* No web-app dashboard feel.
+
+Layout:
+
+```text
++------------------------------------------------+
+| native menu                                    |
++------------------------------------------------+
+| optional small toolbar                         |
++------------------------------------------------+
+|                                                |
+|              rendered document                 |
+|                                                |
+|       active block appears as raw Markdown      |
+|                                                |
++------------------------------------------------+
+| optional small status bar                      |
++------------------------------------------------+
+```
+
+Document width:
+
+* Default max width: 780–900 px.
+* Centre document area.
+* Allow narrow/normal/wide mode.
+
+Active block styling:
+
+* Monospace.
+* Slight background contrast.
+* Subtle border or rounded rectangle.
+* Preserve layout height where practical.
+* Must not look like a modal editor.
+
+Theme:
+
+* Support system theme.
+* Support light and dark mode.
+* Use CSS variables.
+* Avoid hard-coded colours throughout components.
+
+## 25. Performance Requirements
+
+Performance priorities:
+
+1. Fast launch.
+2. Low typing latency.
+3. Minimal JS bundle.
+4. Avoid heavy dependencies.
+5. Avoid large runtime features.
+
+Targets:
+
+* Small Markdown files should open instantly.
+* 100 KB Markdown files should feel immediate.
+* Typing latency must be imperceptible.
+* Full re-render acceptable under 100 KB.
+* Optimise block-level rendering for larger files.
+* Do not load syntax highlighters unless needed.
+* Do not load Mermaid.
+* Do not load MathJax.
+* Do not load Monaco.
+* Do not include a plugin framework in v1.
+* Do not use a local database.
+
+## 26. Security
+
+Markdown rendering must be safe.
+
+Requirements:
+
+* Do not execute scripts from Markdown.
+* Sanitise rendered HTML using a secure integration of DOMPurify.
+* Block inline event handlers.
+* Block `javascript:` URLs.
+* External links open in the default browser.
+* Remote images disabled by default.
+* Local image rendering conservative.
+* Tauri permissions should be least-privilege.
+* Do not expose broad filesystem access to the frontend unless necessary.
+* Prefer backend file commands for open/save.
+
+## 27. Preferences Storage
+
+Store preferences locally.
+
+Requirements:
+
+* Human-readable JSON is acceptable.
+* Include schema version.
+* Gracefully handle missing or corrupt preferences.
+* Fall back to defaults if preferences cannot be read.
+* Do not lose the user’s settings during normal app upgrades.
+
+Suggested shape:
+
+```json
+{
+  "version": 1,
+  "preferences": {
+    "theme": "system",
+    "fontSize": 16,
+    "editorFontFamily": "ui-monospace, SFMono-Regular, Consolas, Liberation Mono, monospace",
+    "readerFontFamily": "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    "lineWidth": "normal",
+    "showStatusBar": true,
+    "showToolbar": true,
+    "defaultMode": "rendered",
+    "shortcuts": {}
+  }
+}
+```
+
+If `shortcuts` is empty, use defaults.
+
+## 28. Open Source Requirements
+
+Prepare repository as an open-source project.
+
+Include:
+
+* `README.md`
+* `LICENSE`
+* `CONTRIBUTING.md`
+* Optional `CODE_OF_CONDUCT.md`
+* Clear build instructions.
+* Clear development instructions.
+* Basic architecture notes.
+* Known limitations.
+
+Recommended licence:
+
+* MIT.
+
+README must explain:
+
+* What the app is.
+* What the app deliberately is not.
+* Supported platforms.
+* Markdown dialect.
+* How to build.
+* How to run in development.
+* How to package.
+* Known limitations.
+* Security posture around HTML and remote images.
+
+## 29. Repository Structure
+
+Suggested structure:
+
+```text
+focusmark/
+  README.md
+  LICENSE
+  CONTRIBUTING.md
+  package.json
+  vite.config.ts
+  tsconfig.json
+  src/
+    main.ts
+    app/
+      App.ts
+      state.ts
+      preferences.ts
+      commands.ts
+      shortcuts.ts
+      platform.ts
+    editor/
+      FocusEditor.ts
+      SourceEditor.ts
+      BlockEditor.ts
+      EditorController.ts
+      selection.ts
+      editingCommands.ts
+    markdown/
+      parser.ts
+      renderer.ts
+      sanitize.ts
+      blockModel.ts
+      lineMapping.ts
+    file/
+      FileController.ts
+      lineEndings.ts
+      bom.ts
+      recentFiles.ts
+    ui/
+      Toolbar.ts
+      StatusBar.ts
+      FindBox.ts
+      Settings.ts
+      ShortcutSettings.ts
+      Dialogs.ts
+      About.ts
+    styles/
+      base.css
+      themes.css
+      markdown.css
+      editor.css
+  src-tauri/
+    Cargo.toml
+    tauri.conf.json
+    src/
+      main.rs
+      file_commands.rs
+      preferences.rs
+      app_events.rs
+```
+
+## 30. Startup Behaviour
+
+### 30.1 No File Argument
+
+* Open clean empty document.
+* Window title:
+
+```text
+Untitled - FocusMark
+```
+
+### 30.2 File Argument from OS
+
+* Load file.
+* Window title is filename.
+* If multiple file paths are passed, open first file in v1.
+* Later versions may open multiple windows.
+
+### 30.3 Invalid File Path
+
+* Show friendly error.
+* Open empty document.
+
+## 31. Testing Requirements
+
+Unit tests:
+
+* Line ending detection.
+* BOM detection.
+* Source offset to line mapping.
+* Markdown block source range mapping.
+* Dirty state transitions.
+* Save/open round trip.
+* Recent files logic.
+* Active block update logic.
+* Shortcut parsing.
+* Shortcut conflict detection.
+* Shortcut reset behaviour.
+* Formatting commands:
+
+  * Bold.
+  * Italic.
+  * Inline code.
+  * Strikethrough.
+  * Link.
+  * Heading.
+  * List.
+  * Quote.
+  * Code block.
+
+Integration tests where practical:
+
+* Open file.
+* Edit active block.
+* Save.
+* Reopen and verify contents.
+* Toggle source mode and back.
+* Dirty prompt behaviour.
+* Change shortcut.
+* Use changed shortcut.
+* Restore default shortcut.
+
+Manual test fixtures:
+
+```text
+fixtures/
+  simple.md
+  headings.md
+  paragraphs.md
+  lists.md
+  nested-lists.md
+  table.md
+  fenced-code.md
+  blockquotes.md
+  images.md
+  raw-html.md
+  long-document.md
+  crlf.md
+  bom.md
+  gfm-task-list.md
+  gfm-strikethrough.md
+```
+
+Acceptance tests:
+
+1. App launches quickly.
+2. User can open an `.md` file.
+3. User can click a rendered paragraph and edit the raw Markdown block.
+4. Other blocks remain rendered.
+5. User can save file.
+6. Saved file preserves Markdown source.
+7. App warns about unsaved changes.
+8. Double-clicking an `.md` file opens the app.
+9. Source Mode works as reliable fallback.
+10. Toolbar source toggle works.
+11. Ctrl+B / Cmd+B bolds selected text by default.
+12. User can reassign Bold to another shortcut.
+13. Shortcut conflicts are detected.
+14. User can restore default shortcuts.
+15. No telemetry or network calls are made.
+
+## 32. Non-Goals for v1
+
+Do not build:
+
+* Project/workspace sidebar.
+* Cloud sync.
+* Account system.
+* Plugin marketplace.
+* Backlinks.
+* Graph view.
+* Tags database.
+* Multi-pane preview/source split.
+* AI writing assistant.
+* Collaboration.
+* Rich WYSIWYG ribbon.
+* Export to PDF.
+* Mermaid rendering.
+* Math rendering.
+* Mobile app.
+* Browser extension.
+* Full document management system.
+* Database-backed notes.
+* Markdown publishing platform.
+
+## 33. Build and Packaging
+
+Provide development commands:
+
+```bash
+npm install
+npm run dev
+npm run tauri dev
+npm run tauri build
+```
+
+Packaging should produce:
+
+* Windows installer.
+* macOS app bundle/dmg where practical.
+* Linux AppImage.
+* Optional deb/rpm later.
+
+File association must be configured in Tauri bundle settings.
+
+Icons:
+
+* Include simple placeholder app icon.
+* Do not block implementation on final icon design.
+
+## 34. Implementation Phases
+
+### Phase 1: Skeleton
+
+* Create Tauri v2 app.
+* Add minimal frontend.
+* Add app state.
+* Add open/save/save-as commands.
+* Add native menus.
+* Add dirty state.
+* Add basic Markdown rendering.
+
+### Phase 2: Source Mode
+
+* Add full raw Markdown editor using CodeMirror.
+* Implement open/edit/save reliably.
+* Confirm line endings and BOM preservation.
+* Confirm dirty state.
+* Confirm unsaved-change prompts.
+
+### Phase 3: Command Registry and Shortcuts
+
+* Add central command registry.
+* Add default shortcuts.
+* Route menu actions through command registry.
+* Route toolbar actions through command registry.
+* Route keyboard actions through command registry.
+
+### Phase 4: Settings
+
+* Add preferences storage.
+* Add settings UI.
+* Add keyboard shortcut settings.
+* Add shortcut conflict detection.
+* Add reset shortcut support.
+* Add reset all shortcuts support.
+
+### Phase 5: Rendered Block Editing
+
+* Add block parser/model (e.g., using `remark-parse` for exact offset targeting).
+* Add rendered document view.
+* Add active block detection.
+* Add active block editor (CodeMirror instance with continuous global undo/redo tracking).
+* Commit edits to source model.
+* Re-render document after edits.
+
+### Phase 6: Markdown Edge Cases
+
+* Lists.
+* Nested lists.
+* Tables.
+* Fenced code blocks.
+* Blockquotes.
+* Images.
+* Links.
+* Raw HTML behaviour (sanitised via DOMPurify).
+
+### Phase 7: Desktop Integration
+
+* File associations.
+* Open-with behaviour (including macOS native notification setup).
+* Single-instance behaviour (`tauri-plugin-single-instance` event forwarding).
+* Recent files.
+* Native window title updates.
+* Unsaved-change protection on quit.
+* Multiple windows if practical.
+
+### Phase 8: Polish
+
+* Themes.
+* Toolbar.
+* Status bar.
+* Find.
+* Font size controls.
+* README.
+* Build scripts.
+* Release packaging.
+
+## 35. Quality Bar
+
+The app is successful if it feels like:
+
+> A Markdown viewer where the current block instantly becomes Notepad, with enough keyboard shortcuts that the mouse is optional.
+
+It should remain:
+
+* Small.
+* Fast.
+* Simple.
+* Portable.
+* Open source.
+* File-based.
+* Predictable.
+* Keyboard-friendly.
+
+It should not become:
+
+* A full IDE.
+* A note database.
+* A project manager.
+* A slow rich-text editor.
+* A plugin platform.
+* A complicated Markdown publishing system.
+
+The core rule:
+
+> Prefer simple, fast and predictable over clever.
