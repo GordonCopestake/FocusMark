@@ -9,9 +9,15 @@
   <body>
     <div id="app">
       <div id="toolbar"><span style="color:var(--text-secondary);padding:8px;">Toolbar loading...</span></div>
-      <div id="editor-container"><div style="padding:32px;color:var(--text-secondary);">Loading editor...</div></div>
+      <div id="editor-container"><div style="padding:32px;color:var(--text-secondary);" id="status-msg">Loading editor...</div></div>
       <div id="status-bar"><span style="color:var(--text-secondary);padding:4px;">Status bar loading...</span></div>
     </div>
+    <script>
+      // Non-module inline test — does ANY JS execute?
+      document.getElementById('status-msg').textContent = 'JS inline works';
+      document.getElementById('status-msg').style.color = 'green';
+      console.log('Inline JS executed');
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
