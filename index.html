@@ -13,23 +13,16 @@
       <div id="status-bar"><span style="color:var(--text-secondary);padding:4px;">Status bar loading...</span></div>
     </div>
     <script>
-      // Non-module inline test — does ANY JS execute?
-      document.getElementById('status-msg').textContent = 'JS inline works';
-      document.getElementById('status-msg').style.color = 'green';
-      console.log('Inline JS executed');
-    </script>
-    <script type="module" crossorigin src="/src/main.ts"></script>
-    <script>
-      // Fallback: if module script fails, try dynamic import
-      window.addEventListener('load', function() {
-        var msg = document.getElementById('status-msg');
-        if (msg && msg.textContent === 'JS inline works') {
-          msg.textContent = 'Module failed, trying dynamic import...';
-          msg.style.color = 'orange';
-          import('/src/main.ts').catch(function(e) {
-            msg.textContent = 'Error: ' + e.message;
-            msg.style.color = 'red';
-          });
+      // Bootstrap: load the app via dynamic import (works around Tauri webview module issues)
+      document.getElementById('status-msg').textContent = 'Loading app...';
+      import('/src/main.ts').then(function() {
+        var m = document.getElementById('status-msg');
+        if (m) m.remove();
+      }).catch(function(e) {
+        var m = document.getElementById('status-msg');
+        if (m) {
+          m.textContent = 'Error loading app: ' + e.message;
+          m.style.color = 'red';
         }
       });
     </script>
