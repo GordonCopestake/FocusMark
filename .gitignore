@@ -4,6 +4,7 @@ target/
 *.log
 .DS_Store
 Thumbs.db
+prompt.txt
 
 # Compiled TypeScript output
 src/**/*.js
