@@ -19,5 +19,19 @@
       console.log('Inline JS executed');
     </script>
     <script type="module" crossorigin src="/src/main.ts"></script>
+    <script>
+      // Fallback: if module script fails, try dynamic import
+      window.addEventListener('load', function() {
+        var msg = document.getElementById('status-msg');
+        if (msg && msg.textContent === 'JS inline works') {
+          msg.textContent = 'Module failed, trying dynamic import...';
+          msg.style.color = 'orange';
+          import('/src/main.ts').catch(function(e) {
+            msg.textContent = 'Error: ' + e.message;
+            msg.style.color = 'red';
+          });
+        }
+      });
+    </script>
   </body>
 </html>
