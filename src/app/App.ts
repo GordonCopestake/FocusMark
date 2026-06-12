@@ -69,8 +69,11 @@ export class App {
     this.settingsUi = new SettingsUi(this.getContext());
     this.aboutUi = new AboutUi();
 
-    // Load Tauri-backed preferences async, then init
-    this.loadPreferencesAsync().then(() => this.init());
+    // Init immediately, load Tauri prefs in background
+    this.init();
+    loadPreferencesFromTauri().then((p) => {
+      if (p) { this.prefs = p; setPreferences(p); }
+    }).catch(() => {});
   }
 
   getContext(): CommandContext {
@@ -107,48 +110,45 @@ export class App {
     };
   }
 
-  private async loadPreferencesAsync(): Promise<void> {
-    const tauriPrefs = await loadPreferencesFromTauri();
-    if (tauriPrefs) {
-      this.prefs = tauriPrefs;
-      setPreferences(tauriPrefs);
-    }
-  }
-
   private init(): void {
-    this.prefs = getPreferences();
-    this.toolbarUi.init();
-    this.statusBarUi.init();
-    this.toolbarUi.showToolbar(this.prefs.showToolbar);
-    this.statusBarUi.showStatusBar(this.prefs.showStatusBar);
+    try {
+      this.prefs = getPreferences();
+      this.toolbarUi.init();
+      this.statusBarUi.init();
+      this.toolbarUi.showToolbar(this.prefs.showToolbar);
+      this.statusBarUi.showStatusBar(this.prefs.showStatusBar);
 
-    document.documentElement.style.setProperty("--editor-font-size", `${this.prefs.fontSize}px`);
-    document.documentElement.style.setProperty("--editor-font-family", this.prefs.editorFontFamily);
-    document.documentElement.style.setProperty("--reader-font-family", this.prefs.readerFontFamily);
-    this.applyLineWidth();
-    configureRenderer(this.prefs.htmlHandling);
+      document.documentElement.style.setProperty("--editor-font-size", `${this.prefs.fontSize}px`);
+      document.documentElement.style.setProperty("--editor-font-family", this.prefs.editorFontFamily);
+      document.documentElement.style.setProperty("--reader-font-family", this.prefs.readerFontFamily);
+      this.applyLineWidth();
+      configureRenderer(this.prefs.htmlHandling);
 
-    subscribe(() => this.onStateChange());
-    document.addEventListener("keydown", (e) => this.handleKeyDown(e));
+      subscribe(() => this.onStateChange());
+      document.addEventListener("keydown", (e) => this.handleKeyDown(e));
 
-    const doc = getDocument();
-    if (doc.mode === "rendered") {
-      this.setupRenderedView();
-    } else {
-      this.setupSourceView();
-    }
-
-    this.handleLaunchArgs();
-
-    window.addEventListener("beforeunload", (e) => {
-      if (getDocument().dirty) {
-        e.preventDefault();
-        e.returnValue = "";
+      const doc = getDocument();
+      if (doc.mode === "rendered") {
+        this.setupRenderedView();
+      } else {
+        this.setupSourceView();
       }
-    });
 
-    // Listen for native menu commands from Tauri backend
-    this.listenForMenuCommands();
+      this.handleLaunchArgs();
+      window.addEventListener("beforeunload", (e) => {
+        if (getDocument().dirty) {
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      });
+      this.listenForMenuCommands();
+    } catch (e) {
+      console.error("FocusMark init failed:", e);
+      this.editorContainer.innerHTML = `<div style="padding:32px;color:red;font-family:monospace;">
+        <h3>Initialization Error</h3>
+        <pre>${String(e)}</pre>
+      </div>`;
+    }
   }
 
   getActiveEditor(): EditorController | null {
@@ -468,41 +468,33 @@ export class App {
     this.editorContainer.innerHTML = "";
     this.renderedContainer = null;
     this.renderFullDocument();
+
+    // If document is empty, auto-activate the empty block so user can type immediately
+    const doc = getDocument();
+    if (doc.currentText.trim() === "" && doc.activeBlockId === null) {
+      const blocks = parseBlocks(doc.currentText);
+      if (blocks.length > 0) {
+        updateDocument({ activeBlockId: blocks[0].id });
+      }
+    }
   }
 
   // ─── Menu & event listeners ─────────────────────────────────────
 
   private listenForMenuCommands(): void {
-    try {
-      // Use __TAURI__ global for sync access
-      const tauriEvent = (window as any).__TAURI__?.event;
-      if (tauriEvent?.listen) {
-        tauriEvent.listen("menu-command", (event: { payload: string }) => {
-          const cmd = commandRegistry.find((c) => c.id === event.payload);
-          if (cmd) {
-            cmd.run(this.getContext());
-          }
-        });
-        tauriEvent.listen("open-file", (event: { payload: string }) => {
-          this.openFileByPath(event.payload);
-        });
-      } else {
-        // Fallback: use dynamic import (slower but works)
-        import("@tauri-apps/api/event").then(({ listen }) => {
-          listen<string>("menu-command", (event) => {
-            const cmd = commandRegistry.find((c) => c.id === event.payload);
-            if (cmd) {
-              cmd.run(this.getContext());
-            }
-          });
-          listen<string>("open-file", (event) => {
-            this.openFileByPath(event.payload);
-          });
-        }).catch(() => {});
-      }
-    } catch {
-      // Not in Tauri environment
-    }
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen<string>("menu-command", (event) => {
+        const cmd = commandRegistry.find((c) => c.id === event.payload);
+        if (cmd) {
+          cmd.run(this.getContext());
+        }
+      });
+      listen<string>("open-file", (event) => {
+        this.openFileByPath(event.payload);
+      });
+    }).catch(() => {
+      // Not in Tauri environment, menu events unavailable
+    });
   }
 
   private async openFileByPath(filePath: string): Promise<void> {
