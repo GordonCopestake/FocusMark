@@ -4,27 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FocusMark</title>
-    <link rel="stylesheet" href="/src/styles/base.css" />
   </head>
   <body>
     <div id="app">
-      <div id="toolbar"><span style="color:var(--text-secondary);padding:8px;">Toolbar loading...</span></div>
-      <div id="editor-container"><div style="padding:32px;color:var(--text-secondary);" id="status-msg">Loading editor...</div></div>
-      <div id="status-bar"><span style="color:var(--text-secondary);padding:4px;">Status bar loading...</span></div>
+      <div id="toolbar"></div>
+      <div id="editor-container"><div style="padding:32px;color:var(--text-secondary);font-family:sans-serif;">Loading FocusMark...</div></div>
+      <div id="status-bar"></div>
     </div>
-    <script>
-      // Bootstrap: load the app via dynamic import (works around Tauri webview module issues)
-      document.getElementById('status-msg').textContent = 'Loading app...';
-      import('/src/main.ts').then(function() {
-        var m = document.getElementById('status-msg');
-        if (m) m.remove();
-      }).catch(function(e) {
-        var m = document.getElementById('status-msg');
-        if (m) {
-          m.textContent = 'Error loading app: ' + e.message;
-          m.style.color = 'red';
-        }
-      });
-    </script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
